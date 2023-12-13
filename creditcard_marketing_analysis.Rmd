@@ -1,0 +1,134 @@
+---
+title: "Credit Card Marketing Models"
+author: "Vincent Bianchi"
+date: "2023-12-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Analyzing a logistic regression, GAM and a neural network model with  `CreditCard_Ads.csv` dataset for targeted advertising in a credit card marketing campaign.
+
+
+```{r}
+# Reading in Data
+rm(list=ls())
+
+credit_data <- read.csv("CreditCard_Ads.csv", header=T, stringsAsFactors=T)
+
+```
+
+
+```{r}
+set.seed(7)
+
+total_obs <- dim(credit_data)[1]
+
+## Data Partition: Train / Test split, 60/40
+
+train_data_indices <- sample(1:total_obs, 0.6*total_obs)
+train_data <- credit_data[train_data_indices,]
+test_data <- credit_data[-train_data_indices,]
+
+```
+
+
+## Logistic Regression Model
+```{r}
+lm_full <- glm(Y~Age+Default+Housing+Loan+Contact+Previous+Poutcome+EVR+CPI+CCI,
+               family='binomial', data=train_data)
+
+summary(lm_full)
+
+```
+## Backward selection
+```{r}
+lm_bwd <- step(lm_full, direction='backward', k=log(nrow(train_data)))
+
+
+
+```
+The variables that were removed were during backward selection were Housing, Loan, Age, and Default.
+
+
+## Gam model
+```{r}
+library(gam)
+
+gam1 <- gam(Y~s(Age,df=4)+Default+Housing+Loan+Contact+s(Previous,df=4)+Poutcome+s(EVR,df=4)+s(CPI,df=4)+s(CCI,df=4),
+               family='binomial', data=train_data)
+
+plot(gam1, col='salmon')
+```
+## Neural Network Model
+```{r}
+
+# generating the training dataset that is needed for the estimation of NN using the function model.matrix()
+
+
+x_train_nn <- model.matrix(~Age+Default+Housing+Loan+Contact+Previous+Poutcome+EVR+CPI+CCI, data = train_data)[,-1]
+  
+# standardization
+x_mean <- apply(x_train_nn, 2, mean)
+x_sd <- apply(x_train_nn, 2, sd)
+x_train_nn <- scale(x_train_nn, center = x_mean, scale = x_sd)
+
+x_train_nn <- cbind.data.frame(train_data$Y, x_train_nn)
+colnames(x_train_nn)[1] <- 'Y'
+
+```
+
+```{r}
+# generating the test dataset that is needed for the out of sample prediction evaluation of NN using the function model.matrix()
+
+x_test_nn <- model.matrix(~Age+Default+Housing+Loan+Contact+Previous+Poutcome+EVR+CPI+CCI, data = test_data)[,-1]
+
+# standardization
+x_test_nn <- scale(x_test_nn, center=x_mean, scale=x_sd)
+
+```
+
+```{r}
+# fitting a NN with one hidden layer and four hidden units
+
+library(neuralnet)
+set.seed(7)
+
+nn1 <- neuralnet(Y=='yes'~., data=x_train_nn, hidden=c(4), linear.output=F)
+
+plot(nn1, rep='best')
+```
+# Model Evaluation Out-of-Sample
+```{r}
+library(caret)
+
+lm_full_pred <- predict(lm_full, newdata = test_data, type = 'response')
+lm_bwd_pred <- predict(lm_bwd, newdata = test_data, type = 'response')
+gam1_pred <- predict(gam1, newdata=test_data, type='response')
+nn1_pred <- predict(nn1, newdata=x_test_nn)[,1]
+
+
+lm_full_acc <- confusionMatrix(factor(ifelse(lm_full_pred>0.5, 'yes', 'no')), test_data$Y, positive='yes')
+
+lm_bwd_acc <- confusionMatrix(factor(ifelse(lm_bwd_pred>0.5, 'yes', 'no')), test_data$Y, positive='yes')
+
+gam1_acc <- confusionMatrix(factor(ifelse(gam1_pred>0.5, 'yes', 'no')), test_data$Y, positive='yes')
+
+nn1_acc <- confusionMatrix(factor(ifelse(nn1_pred>0.5, 'yes', 'no')), test_data$Y, positive='yes')
+
+lm_full_acc
+lm_bwd_acc
+gam1_acc
+nn1_acc
+
+```
+# Generating a lift chart to compare the prediction performance of the four models
+```{r}
+lift_chart <- lift(test_data$Y~lm_full_pred+lm_bwd_pred+gam1_pred+nn1_pred, class='yes', cuts=200)
+
+xyplot(lift_chart, auto.key=list(columns=3), main='Lift Chart')
+
+```
+
